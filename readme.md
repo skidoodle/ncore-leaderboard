@@ -12,8 +12,8 @@ This is a Go program for scraping and sorting user profile data from [nCore](htt
 
 1. Clone the repository and install dependencies:
    ```bash
-   git clone https://github.com/skidoodle/scrapencore
-   cd scrapencore
+   git clone https://github.com/skidoodle/ncore-leaderboard
+   cd ncore-leaderboard
    go mod tidy
    ```
 
