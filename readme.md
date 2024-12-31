@@ -47,7 +47,7 @@ The CSV file `output.log` contains:
 2. Attribute Value (e.g., rank)
 
 ## License
-This project is licensed under the MIT License.
+This project is licensed under the GPL-3.0 License.
 
 
 
