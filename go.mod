@@ -1,4 +1,4 @@
-module scrapencore
+module ncore-leaderboard
 
 go 1.23
 
