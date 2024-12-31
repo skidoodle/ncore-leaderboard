@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -20,15 +22,23 @@ const (
 	endProfile   = 1812000
 	concurrency  = 50
 	outputFile   = "output.log"
+	writeBatch   = 100
 )
 
 var (
-	nick   string
-	pass   string
-	client *http.Client
-	wg     sync.WaitGroup
-	mu     sync.Mutex
+	nick      string
+	pass      string
+	client    *http.Client
+	wg        sync.WaitGroup
+	mu        sync.Mutex
+	lines     []Line
+	processed int32
 )
+
+type Line struct {
+	URL       string
+	SecondCol int
+}
 
 func init() {
 	_ = godotenv.Load(".env.local")
@@ -75,28 +85,75 @@ func fetchProfile(id int) {
 				switch label {
 				case "Helyezés:":
 					rank := strings.TrimSuffix(value, ".")
+					rankInt, err := strconv.Atoi(rank)
+					if err != nil {
+						log.Printf("Skipping profile %d due to invalid rank: %s\n", id, rank)
+						return
+					}
 					mu.Lock()
-					logToFile(url, rank)
+					lines = append(lines, Line{URL: url, SecondCol: rankInt})
 					mu.Unlock()
-					fmt.Printf("\rProcessed %d/%d profiles...", id, endProfile)
+					atomic.AddInt32(&processed, 1)
+					if atomic.LoadInt32(&processed)%writeBatch == 0 {
+						writeSortedOutput()
+					}
+					printProgress()
 				}
 			}
 		})
 	})
 }
 
-func logToFile(url string, rank string) {
-	file, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+func printProgress() {
+	fmt.Printf("\rProcessed %d profiles...", atomic.LoadInt32(&processed))
+}
+
+func quicksort(lines []Line, low, high int) {
+	if low < high {
+		p := partition(lines, low, high)
+		quicksort(lines, low, p-1)
+		quicksort(lines, p+1, high)
+	}
+}
+
+func partition(lines []Line, low, high int) int {
+	pivot := lines[high].SecondCol
+	i := low - 1
+	for j := low; j < high; j++ {
+		if lines[j].SecondCol < pivot {
+			i++
+			lines[i], lines[j] = lines[j], lines[i]
+		}
+	}
+	lines[i+1], lines[high] = lines[high], lines[i+1]
+	return i + 1
+}
+
+func sortLinesQuick() {
+	if len(lines) > 1 {
+		quicksort(lines, 0, len(lines)-1)
+	}
+}
+
+func writeSortedOutput() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	sortLinesQuick()
+
+	file, err := os.Create(outputFile)
 	if err != nil {
-		log.Fatalf("Error opening output file: %v\n", err)
+		log.Fatalf("Error creating output file: %v\n", err)
 	}
 	defer file.Close()
 
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	if err := writer.Write([]string{url, rank}); err != nil {
-		log.Fatalf("Error writing to output file: %v\n", err)
+	for _, line := range lines {
+		if err := writer.Write([]string{line.URL, strconv.Itoa(line.SecondCol)}); err != nil {
+			log.Printf("Error writing line to output file: %v\n", err)
+		}
 	}
 }
 
@@ -127,6 +184,9 @@ func main() {
 		}
 	}
 	wg.Wait()
+
+	writeSortedOutput()
+
 	elapsedTime := time.Since(startTime)
-	fmt.Printf("\nScraping completed in %s\n", elapsedTime)
+	fmt.Printf("\nScraping and sorting completed in %s\n", elapsedTime)
 }
